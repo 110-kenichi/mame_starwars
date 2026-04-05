@@ -249,6 +249,7 @@ public:
 	void frame_end()
 	{
 		m_next_points = m_pending_points;
+		//sort_points_by_nearest_start(m_next_points);
 		m_next_frame_ready = true;
 
 		if (m_points.size() < 2U)
@@ -461,6 +462,66 @@ private:
 		return (dx * dx) + (dy * dy);
 	}
 
+	static void sort_points_by_nearest_start(std::vector<scope_point> &points)
+	{
+		std::size_t const segment_count = points.size() / 2U;
+
+		if (segment_count < 2U)
+			return;
+
+		std::vector<scope_point> sorted;
+		std::vector<bool> used(segment_count, false);
+		sorted.reserve(segment_count * 2U);
+
+		std::size_t current = 0U;
+		used[current] = true;
+		sorted.push_back(points[(current * 2U) + 0U]);
+		sorted.push_back(points[(current * 2U) + 1U]);
+
+		for (std::size_t ordered = 1U; ordered < segment_count; ++ordered)
+		{
+			scope_point const &current_end = sorted[(ordered * 2U) - 1U];
+			std::size_t best = segment_count;
+			double best_distance = 0.0;
+			bool reverse_best = false;
+
+			for (std::size_t candidate = 0U; candidate < segment_count; ++candidate)
+			{
+				if (used[candidate])
+					continue;
+
+				double const start_distance = distance_sq(current_end, points[(candidate * 2U) + 0U]);
+				double const end_distance = distance_sq(current_end, points[(candidate * 2U) + 1U]);
+				double const candidate_distance = std::min(start_distance, end_distance);
+				bool const reverse_candidate = (end_distance < start_distance);
+
+				if ((segment_count == best) || (candidate_distance < best_distance))
+				{
+					best = candidate;
+					best_distance = candidate_distance;
+					reverse_best = reverse_candidate;
+				}
+			}
+
+			if (segment_count == best)
+				break;
+
+			used[best] = true;
+			if (reverse_best)
+			{
+				sorted.push_back(points[(best * 2U) + 1U]);
+				sorted.push_back(points[(best * 2U) + 0U]);
+			}
+			else
+			{
+				sorted.push_back(points[(best * 2U) + 0U]);
+				sorted.push_back(points[(best * 2U) + 1U]);
+			}
+			current = best;
+		}
+
+		points.swap(sorted);
+	}
 	static bool intersect(scope_point const &p0, scope_point const &p1, double bound, bool is_x, scope_point &out_point)
 	{
 		double const delta = is_x ? (p1.x - p0.x) : (p1.y - p0.y);
