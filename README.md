@@ -1,3 +1,18 @@
+# MAME for only the Atari Star Wars with an oscilloscope renderer via 2nd audio interface
+
+##How to use an oscilloscope
+
+1. Buy an audio interface that meets the following specifications
+   1. DC coupling support
+   2. High-resolution playback support ( 384 kHz , etc )
+   - GraveAudio CX-Pro DA06 is nice.
+2. Connect it to PC and connect to the oscilloscope using an audio cable
+3. Set the oscilloscope to XY mode
+
+##How to launch MAME
+
+e.g.) tiny.exe starwars1 -sn <Oscilloscope Audio Interface Name(**ASCII ONLY**)> [-olod <value(0.01 is reccomended)>] [-ospd <value(2 is reccomended)>]
+
 # MAME
 
 ## What is MAME?

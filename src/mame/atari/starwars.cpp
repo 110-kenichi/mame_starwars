@@ -88,6 +88,10 @@ public:
 				double(m_machine.options().float_value(WINOPTION_OSC_SPEED_FACTOR)),
 				0.5,
 				5.0);
+		m_lod_min_length = std::clamp(
+				double(m_machine.options().float_value(WINOPTION_OSC_LOD_MIN_LENGTH)),
+				0.0,
+				0.05);
 		m_sample_rate = std::max(m_machine.options().sample_rate(), 44100);
 		m_frame_samples = std::max(m_sample_rate / 240, 256);
 		m_pcm.resize(std::size_t(m_frame_samples) * 2U);
@@ -189,6 +193,7 @@ public:
 	void frame_begin()
 	{
 		m_pending_points.clear();
+		m_lod_keep_accumulator = 0.0;
 	}
 
 	void add_line(int x0, int y0, int x1, int y1, int intensity)
@@ -199,15 +204,46 @@ public:
 		double const xcenter = double((visarea.max_x + visarea.min_x) / 2) * 65536.0;
 		double const ycenter = double((visarea.max_y + visarea.min_y) / 2) * 65536.0;
 		double brightness;
+		double x0_normalized;
+		double y0_normalized;
+		double x1_normalized;
+		double y1_normalized;
+		double dx;
+		double dy;
+		double length;
 
 		if ((half_width <= 0.0) || (half_height <= 0.0) || (intensity <= 0))
 			return;
 
 		brightness = double(intensity) / 255.0;
 		brightness *= brightness;
+		brightness *= brightness;
 
-		m_pending_points.emplace_back(scope_point{ (double(x0) - xcenter) / half_width, -(double(y0) - ycenter) / half_height, brightness });
-		m_pending_points.emplace_back(scope_point{ (double(x1) - xcenter) / half_width, -(double(y1) - ycenter) / half_height, brightness });
+		x0_normalized = (double(x0) - xcenter) / half_width;
+		y0_normalized = -(double(y0) - ycenter) / half_height;
+		x1_normalized = (double(x1) - xcenter) / half_width;
+		y1_normalized = -(double(y1) - ycenter) / half_height;
+		dx = x1_normalized - x0_normalized;
+		dy = y1_normalized - y0_normalized;
+		length = std::sqrt((dx * dx) + (dy * dy));
+
+		if (length > 1.0e-9)
+		{
+			if ((m_lod_min_length > 0.0) && (length < m_lod_min_length))
+			{
+				double keep_ratio = std::clamp(length / m_lod_min_length, 0.0, 1.0);
+
+				// Keep a few faint short vectors so distant objects do not disappear entirely.
+				keep_ratio = std::max(keep_ratio * (0.5 + (0.5 * brightness)), 0.125);
+				m_lod_keep_accumulator += keep_ratio;
+				if (m_lod_keep_accumulator < 1.0)
+					return;
+				m_lod_keep_accumulator -= 1.0;
+			}
+		}
+
+		m_pending_points.emplace_back(scope_point{ x0_normalized, y0_normalized, brightness });
+		m_pending_points.emplace_back(scope_point{ x1_normalized, y1_normalized, brightness });
 	}
 
 	void frame_end()
@@ -667,6 +703,8 @@ private:
 	int m_buffer_count = 8;
 	double m_segment_pos = 0.0;
 	double m_speed_scale = 1.0;
+	double m_lod_min_length = 0.0;
+	double m_lod_keep_accumulator = 0.0;
 	double m_total_length = 1.0e-6;
 	bool m_next_frame_ready = false;
 	bool m_frame_started = false;

@@ -120,6 +120,7 @@
 // oscilloscope output options
 #define WINOPTION_XY_SCOPE_DEVICE       "xy_scope_device"
 #define WINOPTION_OSC_SPEED_FACTOR      "osc_spd_factor"
+#define WINOPTION_OSC_LOD_MIN_LENGTH    "osc_lod_min_length"
 
 
 //============================================================
@@ -235,6 +236,7 @@ public:
 	// oscilloscope output options
 	const char *xy_scope_device() const { return value(WINOPTION_XY_SCOPE_DEVICE); }
 	float osc_speed_factor() const { return float_value(WINOPTION_OSC_SPEED_FACTOR); }
+	float osc_lod_min_length() const { return float_value(WINOPTION_OSC_LOD_MIN_LENGTH); }
 };
 
 #endif // MAME_OSD_WINDOWS_WINOPTS_H

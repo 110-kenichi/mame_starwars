@@ -134,6 +134,7 @@ options_entry const f_win_option_entries[] =
 	{ nullptr,                                        nullptr,    core_options::option_type::HEADER,     "OSCILLOSCOPE OUTPUT OPTIONS" },
 	{ WINOPTION_XY_SCOPE_DEVICE ";sn",               "",         core_options::option_type::STRING,     "select oscilloscope audio device by name" },
 	{ WINOPTION_OSC_SPEED_FACTOR ";ospd(0.5-5.0)",   "1.0",      core_options::option_type::FLOAT,      "set oscilloscope vector drawing speed factor" },
+	{ WINOPTION_OSC_LOD_MIN_LENGTH ";olod(0.0-0.05)", "0.0",     core_options::option_type::FLOAT,      "drop a portion of very short oscilloscope vectors below this normalized length" },
 
 	{ nullptr }
 };
