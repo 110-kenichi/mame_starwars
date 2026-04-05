@@ -130,6 +130,11 @@ options_entry const f_win_option_entries[] =
 	{ nullptr,                                        nullptr,    core_options::option_type::HEADER,     "INPUT DEVICE OPTIONS" },
 	{ WINOPTION_DUAL_LIGHTGUN ";dual",                "0",        core_options::option_type::BOOLEAN,    "enable dual lightgun input" },
 
+	// oscilloscope output options
+	{ nullptr,                                        nullptr,    core_options::option_type::HEADER,     "OSCILLOSCOPE OUTPUT OPTIONS" },
+	{ WINOPTION_XY_SCOPE_DEVICE ";sn",               "",         core_options::option_type::STRING,     "select oscilloscope audio device by name" },
+	{ WINOPTION_OSC_SPEED_FACTOR ";ospd(0.5-5.0)",   "1.0",      core_options::option_type::FLOAT,      "set oscilloscope vector drawing speed factor" },
+
 	{ nullptr }
 };
 

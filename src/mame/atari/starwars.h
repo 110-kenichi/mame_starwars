@@ -12,29 +12,22 @@
 
 #include "machine/gen_latch.h"
 #include "machine/mos6530.h"
+#include "notifier.h"
+#include "screen.h"
 #include "slapstic.h"
 #include "machine/x2212.h"
 #include "sound/pokey.h"
 #include "sound/tms5220.h"
+#include "video/vector.h"
+
+class starwars_scope_openal_output;
 
 
 class starwars_state : public driver_device
 {
 public:
-	starwars_state(const machine_config &mconfig, device_type type, const char *tag) :
-		driver_device(mconfig, type, tag),
-		m_soundlatch(*this, "soundlatch"),
-		m_mainlatch(*this, "mainlatch"),
-		m_riot(*this, "riot"),
-		m_mathram(*this, "mathram"),
-		m_maincpu(*this, "maincpu"),
-		m_audiocpu(*this, "audiocpu"),
-		m_pokey(*this, "pokey%u", 1U),
-		m_tms(*this, "tms"),
-		m_novram(*this, "x2212"),
-		m_slapstic(*this, "slapstic"),
-		m_slapstic_bank(*this, "slapstic_bank")
-	{ }
+	starwars_state(const machine_config &mconfig, device_type type, const char *tag);
+	virtual ~starwars_state();
 
 	void starwars(machine_config &config);
 	void esb(machine_config &config);
@@ -45,6 +38,8 @@ public:
 	int matrix_flag_r();
 
 private:
+	required_device<vector_device> m_vector;
+	required_device<screen_device> m_screen;
 	required_device<generic_latch_8_device> m_soundlatch;
 	required_device<generic_latch_8_device> m_mainlatch;
 	required_device<mos6532_device> m_riot;
@@ -72,6 +67,13 @@ private:
 	int16_t m_B = 0;
 	int16_t m_C = 0;
 	int32_t m_ACC = 0;
+	std::unique_ptr<starwars_scope_openal_output> m_scope_output;
+	util::notifier_subscription m_scope_frame_begin;
+	util::notifier_subscription m_scope_frame_end;
+	util::notifier_subscription m_scope_line;
+
+	virtual void machine_start() override ATTR_COLD;
+	void scope_output_stop() ATTR_COLD;
 	void irq_ack_w(uint8_t data);
 	void starwars_nstore_w(uint8_t data);
 	void recall_w(int state);

@@ -117,6 +117,10 @@
 // input options
 #define WINOPTION_DUAL_LIGHTGUN         "dual_lightgun"
 
+// oscilloscope output options
+#define WINOPTION_XY_SCOPE_DEVICE       "xy_scope_device"
+#define WINOPTION_OSC_SPEED_FACTOR      "osc_spd_factor"
+
 
 //============================================================
 //  TYPE DEFINITIONS
@@ -227,6 +231,10 @@ public:
 
 	// input options
 	bool dual_lightgun() const { return bool_value(WINOPTION_DUAL_LIGHTGUN); }
+
+	// oscilloscope output options
+	const char *xy_scope_device() const { return value(WINOPTION_XY_SCOPE_DEVICE); }
+	float osc_speed_factor() const { return float_value(WINOPTION_OSC_SPEED_FACTOR); }
 };
 
 #endif // MAME_OSD_WINDOWS_WINOPTS_H
