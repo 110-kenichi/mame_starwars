@@ -50,3 +50,4 @@ regtests/jedutil/output
 /CMakeLists.txt
 /samples
 /mame.exe
+/OpenAL32.dll
