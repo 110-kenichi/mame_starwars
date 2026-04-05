@@ -11,7 +11,18 @@
 
 ##How to launch MAME
 
-e.g.) tiny.exe starwars1 -sn <Oscilloscope Audio Interface Name(**ASCII ONLY**)> [-olod <value(0.01 is reccomended)>] [-ospd <value(2 is reccomended)>]
+e.g.) tiny.exe starwars1 -sn "OSC USB -olod 0.03-ospd 2 -osr 96000
+
+Special commandline options:
+
+-sn <Oscilloscope Audio Interface Name(**ASCII ONLY**)>
+  Mandatry option.
+-olod <LoD value(0)>
+  0.003-0.01 is reccomended.
+-ospd <vector speed(1)>
+  Larger value is more faster.
+-osr <osc sampling rate(0)>
+  Set Oscilloscope audio interface's sample rate or a lower value.
 
 # MAME
 

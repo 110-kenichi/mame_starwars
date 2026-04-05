@@ -74,6 +74,10 @@ public:
 	#if defined(_WIN32)
 		char const *const device_name = m_machine.options().value(WINOPTION_XY_SCOPE_DEVICE);
 		char const *resolved_name = nullptr;
+		int const requested_sample_rate = std::clamp(
+				m_machine.options().int_value(WINOPTION_OSC_SAMPLE_RATE),
+				0,
+				768000);
 
 		if ((nullptr == device_name) || !device_name[0])
 			return false;
@@ -92,11 +96,6 @@ public:
 				double(m_machine.options().float_value(WINOPTION_OSC_LOD_MIN_LENGTH)),
 				0.0,
 				0.05);
-		m_sample_rate = std::max(m_machine.options().sample_rate(), 44100);
-		m_frame_samples = std::max(m_sample_rate / 240, 256);
-		m_pcm.resize(std::size_t(m_frame_samples) * 2U);
-		m_buffer_ids.resize(m_buffer_count);
-
 		resolved_name = find_device(device_name);
 		m_device = m_openal.alcOpenDevice(resolved_name ? resolved_name : device_name);
 		if (!m_device && device_name[0])
@@ -107,8 +106,15 @@ public:
 			stop();
 			return false;
 		}
-
-		m_context = m_openal.alcCreateContext(m_device, nullptr);
+		m_sample_rate = requested_sample_rate;
+		if(m_sample_rate == 0)
+			m_sample_rate = query_device_sample_rate();
+		ALint const attrs[] =
+		{
+			ALC_FREQUENCY, m_sample_rate,
+			0
+		};
+		m_context = m_openal.alcCreateContext(m_device, attrs);
 		if (!m_context)
 		{
 			osd_printf_error("Star Wars scope output: unable to create OpenAL context\n");
@@ -122,6 +128,13 @@ public:
 			stop();
 			return false;
 		}
+
+		random_border_position(m_hold_x, m_hold_y);
+
+		m_frame_samples = std::max(m_sample_rate / 120, 512);
+		m_buffer_count = (m_sample_rate >= 384000) ? 24 : ((m_sample_rate >= 192000) ? 16 : 8);
+		m_buffer_ids.resize(m_buffer_count);
+		m_pcm.resize(std::size_t(m_frame_samples) * 2U);
 
 		m_openal.alGenSources(1, &m_source_id);
 		if (!m_source_id)
@@ -276,7 +289,9 @@ private:
 	static constexpr ALenum AL_FORMAT_STEREO_FLOAT32 = 0x10011;
 	static constexpr ALenum AL_SOURCE_STATE = 0x1010;
 	static constexpr ALenum AL_STOPPED = 0x1014;
+	static constexpr ALenum AL_BUFFERS_QUEUED = 0x1015;
 	static constexpr ALenum AL_BUFFERS_PROCESSED = 0x1016;
+	static constexpr ALCenum ALC_FREQUENCY = 0x1007;
 	static constexpr ALCenum ALC_DEVICE_SPECIFIER = 0x1005;
 	static constexpr ALCenum ALC_ALL_DEVICES_SPECIFIER = 0x1013;
 
@@ -286,6 +301,7 @@ private:
 		using alcCloseDevice_proc = ALCboolean (*)(ALCdevice *);
 		using alcCreateContext_proc = ALCcontext *(*)(ALCdevice *, ALint const *);
 		using alcDestroyContext_proc = void (*)(ALCcontext *);
+		using alcGetIntegerv_proc = void (*)(ALCdevice *, ALCenum, ALsizei, ALint *);
 		using alcMakeContextCurrent_proc = ALCboolean (*)(ALCcontext *);
 		using alcGetString_proc = ALCchar const *(*)(ALCdevice *, ALCenum);
 		using alcIsExtensionPresent_proc = ALCboolean (*)(ALCdevice *, ALCchar const *);
@@ -305,6 +321,7 @@ private:
 		alcCloseDevice_proc alcCloseDevice = nullptr;
 		alcCreateContext_proc alcCreateContext = nullptr;
 		alcDestroyContext_proc alcDestroyContext = nullptr;
+		alcGetIntegerv_proc alcGetIntegerv = nullptr;
 		alcMakeContextCurrent_proc alcMakeContextCurrent = nullptr;
 		alcGetString_proc alcGetString = nullptr;
 		alcIsExtensionPresent_proc alcIsExtensionPresent = nullptr;
@@ -332,6 +349,7 @@ private:
 				&& load_symbol(alcCloseDevice, "alcCloseDevice")
 				&& load_symbol(alcCreateContext, "alcCreateContext")
 				&& load_symbol(alcDestroyContext, "alcDestroyContext")
+				&& load_symbol(alcGetIntegerv, "alcGetIntegerv")
 				&& load_symbol(alcMakeContextCurrent, "alcMakeContextCurrent")
 				&& load_symbol(alcGetString, "alcGetString")
 				&& load_symbol(alcIsExtensionPresent, "alcIsExtensionPresent")
@@ -356,6 +374,7 @@ private:
 			alcCloseDevice = nullptr;
 			alcCreateContext = nullptr;
 			alcDestroyContext = nullptr;
+			alcGetIntegerv = nullptr;
 			alcMakeContextCurrent = nullptr;
 			alcGetString = nullptr;
 			alcIsExtensionPresent = nullptr;
@@ -450,6 +469,19 @@ private:
 		return nullptr;
 	}
 
+	int query_device_sample_rate()
+	{
+		ALint frequency = 0;
+
+		if (m_device && m_openal.alcGetIntegerv)
+			m_openal.alcGetIntegerv(m_device, ALC_FREQUENCY, 1, &frequency);
+
+		if (frequency > 0)
+			return frequency;
+
+		return std::max(m_machine.options().sample_rate(), 48000);
+	}
+
 	static bool inside(scope_point const &point)
 	{
 		return (-1.0 <= point.x) && (1.0 >= point.x) && (-1.0 <= point.y) && (1.0 >= point.y);
@@ -522,80 +554,97 @@ private:
 
 		points.swap(sorted);
 	}
-	static bool intersect(scope_point const &p0, scope_point const &p1, double bound, bool is_x, scope_point &out_point)
-	{
-		double const delta = is_x ? (p1.x - p0.x) : (p1.y - p0.y);
-		double t;
-
-		if (0.0 == delta)
-			return false;
-
-		t = is_x ? ((bound - p0.x) / delta) : ((bound - p0.y) / delta);
-		if ((0.0 > t) || (1.0 < t))
-			return false;
-
-		out_point.x = is_x ? bound : (p0.x + ((p1.x - p0.x) * t));
-		out_point.y = is_x ? (p0.y + ((p1.y - p0.y) * t)) : bound;
-		out_point.intensity = p0.intensity + ((p1.intensity - p0.intensity) * t);
-		return true;
-	}
-
-	static std::size_t nearest_intersection(std::vector<scope_point> const &points, scope_point const &reference)
-	{
-		std::size_t best = 0;
-		double best_distance = distance_sq(points[0], reference);
-
-		for (std::size_t i = 1; i < points.size(); ++i)
-		{
-			double const current = distance_sq(points[i], reference);
-			if (current < best_distance)
-			{
-				best = i;
-				best_distance = current;
-			}
-		}
-
-		return best;
-	}
 
 	static clipped_segment clip_segment(scope_point const &p0, scope_point const &p1)
 	{
-		static double const bounds[4] = { -1.0, 1.0, -1.0, 1.0 };
-		static bool const bound_is_x[4] = { true, true, false, false };
 		clipped_segment result{ scope_point{}, scope_point{}, false };
-		bool const p0_inside = inside(p0);
-		bool const p1_inside = inside(p1);
-		std::vector<scope_point> intersections;
+		double t0 = 0.0;
+		double t1 = 1.0;
+		double const dx = p1.x - p0.x;
+		double const dy = p1.y - p0.y;
+		static constexpr double axis_epsilon = 1.0e-6;
+		static constexpr double far_limit = 1.5;
 
-		for (int i = 0; i < 4; ++i)
+		auto clip_test = [&t0, &t1] (double p, double q) -> bool
 		{
-			scope_point point;
-			if (intersect(p0, p1, bounds[i], bound_is_x[i], point))
-				intersections.push_back(point);
-		}
+			double r;
 
-		if (p0_inside && p1_inside)
-			return clipped_segment{ p0, p1, true };
+			if (0.0 == p)
+				return q >= 0.0;
 
-		if (!p0_inside && !p1_inside)
-		{
-			if (2 == intersections.size())
+			r = q / p;
+			if (p < 0.0)
 			{
-				if (distance_sq(intersections[0], p0) > distance_sq(intersections[1], p0))
-					std::swap(intersections[0], intersections[1]);
-				return clipped_segment{ intersections[0], intersections[1], true };
+				if (r > t1)
+					return false;
+				if (r > t0)
+					t0 = r;
 			}
+			else
+			{
+				if (r < t0)
+					return false;
+				if (r < t1)
+					t1 = r;
+			}
+
+			return true;
+		};
+
+		// Handle segments that are entirely outside the normal viewing area but may still be visible on the physical monitor due to deflection overshoot.
+		if ((std::abs(dy) <= axis_epsilon) && (((p0.y <= -far_limit) && (p1.y <= -far_limit)) || ((p0.y >= far_limit) && (p1.y >= far_limit))))
+		{
+			result.a.x = std::clamp(p0.x, -1.0, 1.0);
+			result.b.x = std::clamp(p1.x, -1.0, 1.0);
+			result.a.y = (p0.y < 0.0) ? -1.0 : 1.0;
+			result.b.y = result.a.y;
+			result.a.intensity = p0.intensity;
+			result.b.intensity = p1.intensity;
+			if (std::abs(result.b.x - result.a.x) <= axis_epsilon)
+			{
+				result.a.x = -1.0;
+				result.b.x = 1.0;
+			}
+			result.a.intensity = 3.0;
+			result.b.intensity = 3.0;
+			result.valid = true;
 			return result;
 		}
 
-		if (!intersections.empty())
+		if ((std::abs(dx) <= axis_epsilon) && (((p0.x <= -far_limit) && (p1.x <= -far_limit)) || ((p0.x >= far_limit) && (p1.x >= far_limit))))
 		{
-			if (!p0_inside)
-				return clipped_segment{ intersections[nearest_intersection(intersections, p1)], p1, true };
-			if (!p1_inside)
-				return clipped_segment{ p0, intersections[nearest_intersection(intersections, p0)], true };
+			result.a.y = std::clamp(p0.y, -1.0, 1.0);
+			result.b.y = std::clamp(p1.y, -1.0, 1.0);
+			result.a.x = (p0.x < 0.0) ? -1.0 : 1.0;
+			result.b.x = result.a.x;
+			if (std::abs(result.b.y - result.a.y) <= axis_epsilon)
+			{
+				result.a.y = -1.0;
+				result.b.y = 1.0;
+				result.a.intensity = 3.0;
+				result.b.intensity = 3.0;
+			}
+			result.a.intensity = p0.intensity;
+			result.b.intensity = p1.intensity;
+			result.valid = true;
+			return result;
 		}
 
+		if (!clip_test(-dx, p0.x + 1.0)
+			|| !clip_test(dx, 1.0 - p0.x)
+			|| !clip_test(-dy, p0.y + 1.0)
+			|| !clip_test(dy, 1.0 - p0.y))
+		{
+			return result;
+		}
+
+		result.a.x = p0.x + (t0 * dx);
+		result.a.y = p0.y + (t0 * dy);
+		result.a.intensity = p0.intensity + (t0 * (p1.intensity - p0.intensity));
+		result.b.x = p0.x + (t1 * dx);
+		result.b.y = p0.y + (t1 * dy);
+		result.b.intensity = p0.intensity + (t1 * (p1.intensity - p0.intensity));
+		result.valid = true;
 		return result;
 	}
 
@@ -618,29 +667,70 @@ private:
 			}
 			else
 			{
+				//osd_printf_error("Clipped %lf, %lf - %lf, %lf\n", m_points[i].x, m_points[i].y, m_points[i + 1].x, m_points[i + 1].y);
 				m_segment_lengths.push_back(0.0);
 			}
 		}
 
 		if (m_total_length <= 0.0)
 			m_total_length = 1.0e-6;
+
+        //HACK: 通常はコメントアウトする
+        //m_total_length = 10;
 	}
 
-	double random_signed()
+	double random_unit()
 	{
 		m_random_state = (m_random_state * 1664525U) + 1013904223U;
-		return ((double(m_random_state & 0x00ffffffU) / 16777215.0) * 2.0) - 1.0;
+		return double(m_random_state & 0x00ffffffU) / 16777215.0;
+	}
+
+	void random_border_position(float &x, float &y)
+	{
+		double const edge_pos = (random_unit() * 2.0) - 1.0;
+
+		switch ((m_random_state >> 24) & 0x03U)
+		{
+		case 0:
+			x = -1.0f;
+			y = float(edge_pos);
+			break;
+		case 1:
+			x = 1.0f;
+			y = float(edge_pos);
+			break;
+		case 2:
+			x = float(edge_pos);
+			y = -1.0f;
+			break;
+		default:
+			x = float(edge_pos);
+			y = 1.0f;
+			break;
+		}
 	}
 
 	void generate(float *output, unsigned long frame_count)
 	{
-		std::fill_n(output, frame_count * 2U, 0.0f);
+		for (unsigned long i = 0; i < frame_count; ++i)
+		{
+			output[(i * 2U) + 0U] = m_hold_x;
+			output[(i * 2U) + 1U] = m_hold_y;
+		}
 
 		if (m_next_frame_ready && (m_points.size() < 2U))
 			activate_pending_frame();
 
 		if ((m_points.size() < 2U) || m_segment_lengths.empty())
+		{
+			random_border_position(m_hold_x, m_hold_y);
+			for (unsigned long i = 0; i < frame_count; ++i)
+			{
+				output[(i * 2U) + 0U] = m_hold_x;
+				output[(i * 2U) + 1U] = m_hold_y;
+			}
 			return;
+		}
 
 		double const scale = (double(frame_count) / m_total_length) / 4.0;
 
@@ -654,9 +744,10 @@ private:
 
 			if (!clipped.valid)
 			{
+				random_border_position(m_hold_x, m_hold_y);
+				output[(i * 2U) + 0U] = m_hold_x;
+				output[(i * 2U) + 1U] = m_hold_y;
 				advance_segment();
-				output[(i * 2U) + 0U] = float(random_signed());
-				output[(i * 2U) + 1U] = float(random_signed());
 				continue;
 			}
 
@@ -679,6 +770,8 @@ private:
 
 			output[(i * 2U) + 0U] = float(clipped.a.x + (dx * t));
 			output[(i * 2U) + 1U] = float(clipped.a.y + (dy * t));
+			m_hold_x = output[(i * 2U) + 0U];
+			m_hold_y = output[(i * 2U) + 1U];
 
 			m_segment_pos += speed_factor;
 			if (m_segment_pos > double(samples_per_segment + m_blank_samples))
@@ -705,10 +798,7 @@ private:
 
 		ALint state = 0;
 		ALint processed = 0;
-
-		m_openal.alGetSourcei(m_source_id, AL_SOURCE_STATE, &state);
-		if (state == AL_STOPPED)
-			m_openal.alSourcePlay(m_source_id);
+		ALint queued = 0;
 
 		m_openal.alGetSourcei(m_source_id, AL_BUFFERS_PROCESSED, &processed);
 		while (processed-- > 0)
@@ -718,6 +808,17 @@ private:
 			if (buffer_id)
 				queue_buffer(buffer_id);
 		}
+
+		m_openal.alGetSourcei(m_source_id, AL_BUFFERS_QUEUED, &queued);
+		if (queued <= 0)
+		{
+			for (ALuint buffer_id : m_buffer_ids)
+				queue_buffer(buffer_id);
+		}
+
+		m_openal.alGetSourcei(m_source_id, AL_SOURCE_STATE, &state);
+		if (state == AL_STOPPED)
+			m_openal.alSourcePlay(m_source_id);
 	}
 
 	void advance_segment()
@@ -767,6 +868,8 @@ private:
 	double m_lod_min_length = 0.0;
 	double m_lod_keep_accumulator = 0.0;
 	double m_total_length = 1.0e-6;
+	float m_hold_x = -1.0f;
+	float m_hold_y = -1.0f;
 	bool m_next_frame_ready = false;
 	bool m_frame_started = false;
 	bool m_started = false;
