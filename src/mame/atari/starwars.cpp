@@ -224,12 +224,33 @@ public:
 		return (n - (n * k)) / (k - (std::abs(n) * 2.0 * k) + 1.0);
 	}
 
+	static double source_color_luminance(uint32_t color)
+	{
+		double const red = double((color >> 16) & 0xffU);
+		double const green = double((color >> 8) & 0xffU);
+		double const blue = double(color & 0xffU);
+
+		return ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255.0;
+	}
+
+	static bool color_is_near_black(uint32_t color)
+	{
+		static constexpr uint32_t near_black_threshold = 0x1fU;
+		uint32_t const red = (color >> 16) & 0xffU;
+		uint32_t const green = (color >> 8) & 0xffU;
+		uint32_t const blue = color & 0xffU;
+
+		return (red <= near_black_threshold)
+			&& (green <= near_black_threshold)
+			&& (blue <= near_black_threshold);
+	}
+
 	static double color_luminance(uint32_t color)
 	{
 		double const red = double((color >> 16) & 0xffU);
 		double const green = double((color >> 8) & 0xffU);
 		double const blue = double(color & 0xffU);
-		double const luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255.0;
+		double const luminance = source_color_luminance(color);
 		double const blue_dominance = std::max((blue - std::max(red, green)) / 255.0, 0.0);
 
 		return std::clamp((0.20 + (0.80 * std::pow(std::clamp(luminance, 0.0, 1.0), 0.75))) + (0.18 * blue_dominance), 0.0, 1.0);
@@ -282,7 +303,7 @@ public:
 		static constexpr double far_limit = 1.7;
 		static constexpr double span_limit = 1.0;
 
-		if ((half_width <= 0.0) || (half_height <= 0.0) || (intensity <= 0))
+		if ((half_width <= 0.0) || (half_height <= 0.0) || (intensity <= 0) || color_is_near_black(color))
 			return;
 
 		m_frame_min_intensity = std::min(m_frame_min_intensity, intensity);
@@ -840,26 +861,34 @@ private:
 			double const geometric_length = std::sqrt((dx * dx) + (dy * dy));
 			double length = m_segment_lengths[m_segment_index / 2U];
 			int samples_per_segment;
+			double segment_end;
 			double t;
 			double brightness;
 			double length_speed_boost;
 			double speed_factor;
+			double next_segment_pos;
 
 			if (length <= 1.0e-9)
 				length = 0.05;
 
 			samples_per_segment = std::max(int(std::floor(length * scale)), m_min_samples_per_segment);
+			segment_end = double(samples_per_segment);
 			t = m_segment_pos / double(samples_per_segment);
 			brightness = std::clamp(clipped.a.intensity + (di * t), 0.0, 1.0);
 			length_speed_boost = 1.0 + std::min(geometric_length, 1.0) * 0.5;
 			speed_factor = std::max(std::exp(-(brightness * 3.0)) * m_speed_scale * length_speed_boost * total_length_speed_boost, 0.0001);
+			next_segment_pos = m_segment_pos + speed_factor;
+			if ((m_segment_pos < segment_end) && (next_segment_pos >= segment_end))
+				t = 1.0;
+			else
+				t = std::clamp(t, 0.0, 1.0);
 
 			output[(i * 2U) + 0U] = float(clipped.a.x + (dx * t));
 			output[(i * 2U) + 1U] = float(clipped.a.y + (dy * t));
 			m_hold_x = output[(i * 2U) + 0U];
 			m_hold_y = output[(i * 2U) + 1U];
 
-			m_segment_pos += speed_factor;
+			m_segment_pos = next_segment_pos;
 			if (m_segment_pos > double(samples_per_segment + m_blank_samples))
 				advance_segment();
 		}
