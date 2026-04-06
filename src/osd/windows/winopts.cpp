@@ -136,6 +136,7 @@ options_entry const f_win_option_entries[] =
 	{ WINOPTION_OSC_SPEED_FACTOR ";ospd(0.5-5.0)",   "1.0",      core_options::option_type::FLOAT,      "set oscilloscope vector drawing speed factor" },
 	{ WINOPTION_OSC_LOD_MIN_LENGTH ";olod(0.0-0.05)", "0.0",     core_options::option_type::FLOAT,      "drop a portion of very short oscilloscope vectors below this normalized length" },
 	{ WINOPTION_OSC_SAMPLE_RATE ";osr(0-768000)",   "0",        core_options::option_type::INTEGER,    "request an OpenAL oscilloscope output sample rate, or 0 to use the device default" },
+	{ WINOPTION_OSC_DAMAGE_FLASH ";odmg",           "1",        core_options::option_type::BOOLEAN,    "enable Star Wars oscilloscope damage-flash overlay" },
 
 	{ nullptr }
 };

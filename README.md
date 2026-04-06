@@ -11,7 +11,7 @@
 
 ##How to launch MAME
 
- e.g.) mamestarwars.exe starwars1 -sn "OSC USB" -olod 0.03 -ospd 2 -osr 96000
+ e.g.) mamestarwars.exe starwars1 -sn "OSC USB" -olod 0.03 -ospd 2 -osr 96000 -odmg
 
 Special commandline options:
 
@@ -35,6 +35,11 @@ Special commandline options:
   Higher value can draw vector line more faster but agly.
 
   e.g.) -osr 96000
+
+-odmg <damage flash overlay(1)>
+  1 to show the Star Wars damage-flash diagonal overlay, 0 to disable it.
+
+  e.g.) -odmg 0
 
 ##How to build
 

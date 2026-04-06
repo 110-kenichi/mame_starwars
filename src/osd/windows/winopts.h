@@ -122,6 +122,7 @@
 #define WINOPTION_OSC_SPEED_FACTOR      "osc_spd_factor"
 #define WINOPTION_OSC_LOD_MIN_LENGTH    "osc_lod_min_length"
 #define WINOPTION_OSC_SAMPLE_RATE       "osc_sample_rate"
+#define WINOPTION_OSC_DAMAGE_FLASH      "osc_damage_flash"
 
 
 //============================================================

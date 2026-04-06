@@ -96,6 +96,7 @@ public:
 				double(m_machine.options().float_value(WINOPTION_OSC_LOD_MIN_LENGTH)),
 				0.0,
 				0.05);
+		m_damage_flash_enabled = m_machine.options().bool_value(WINOPTION_OSC_DAMAGE_FLASH);
 		resolved_name = find_device(device_name);
 		m_device = m_openal.alcOpenDevice(resolved_name ? resolved_name : device_name);
 		if (!m_device && device_name[0])
@@ -207,6 +208,7 @@ public:
 	{
 		m_pending_points.clear();
 		m_lod_keep_accumulator = 0.0;
+		m_damage_flash_emitted = false;
 	}
 
 	void add_line(int x0, int y0, int x1, int y1, int intensity)
@@ -224,6 +226,8 @@ public:
 		double dx;
 		double dy;
 		double length;
+		static constexpr double axis_epsilon = 1.0e-6;
+		static constexpr double far_limit = 1.5;
 
 		if ((half_width <= 0.0) || (half_height <= 0.0) || (intensity <= 0))
 			return;
@@ -238,6 +242,23 @@ public:
 		y1_normalized = -(double(y1) - ycenter) / half_height;
 		dx = x1_normalized - x0_normalized;
 		dy = y1_normalized - y0_normalized;
+
+		if (m_damage_flash_enabled && !m_damage_flash_emitted)
+		{
+			bool const far_horizontal = (std::abs(dy) <= axis_epsilon)
+				&& (((y0_normalized <= -far_limit) && (y1_normalized <= -far_limit)) || ((y0_normalized >= far_limit) && (y1_normalized >= far_limit)));
+			bool const far_vertical = (std::abs(dx) <= axis_epsilon)
+				&& (((x0_normalized <= -far_limit) && (x1_normalized <= -far_limit)) || ((x0_normalized >= far_limit) && (x1_normalized >= far_limit)));
+
+			if (far_horizontal && far_vertical)
+			{
+				emit_damage_flash_lines(3.0);
+				m_damage_flash_emitted = true;
+				m_damage_flash_positive_slope = !m_damage_flash_positive_slope;
+				return;
+			}
+		}
+
 		length = std::sqrt((dx * dx) + (dy * dy));
 
 		if (length > 1.0e-9)
@@ -257,6 +278,47 @@ public:
 
 		m_pending_points.emplace_back(scope_point{ x0_normalized, y0_normalized, brightness });
 		m_pending_points.emplace_back(scope_point{ x1_normalized, y1_normalized, brightness });
+	}
+
+	void emit_damage_flash_lines(double intensity)
+	{
+		static constexpr double offsets[5] = { -1.2, -0.6, 0.0, 0.6, 1.2 };
+
+		for (double offset : offsets)
+		{
+			scope_point a;
+			scope_point b;
+
+			if (m_damage_flash_positive_slope)
+			{
+				if (offset <= 0.0)
+				{
+					a = scope_point{ -1.0 - offset, -1.0, intensity };
+					b = scope_point{ 1.0, 1.0 + offset, intensity };
+				}
+				else
+				{
+					a = scope_point{ -1.0, -1.0 + offset, intensity };
+					b = scope_point{ 1.0 - offset, 1.0, intensity };
+				}
+			}
+			else
+			{
+				if (offset <= 0.0)
+				{
+					a = scope_point{ -1.0, 1.0 + offset, intensity };
+					b = scope_point{ 1.0 + offset, -1.0, intensity };
+				}
+				else
+				{
+					a = scope_point{ offset - 1.0, 1.0, intensity };
+					b = scope_point{ 1.0, offset - 1.0, intensity };
+				}
+			}
+
+			m_pending_points.emplace_back(a);
+			m_pending_points.emplace_back(b);
+		}
 	}
 
 	void frame_end()
@@ -562,8 +624,6 @@ private:
 		double t1 = 1.0;
 		double const dx = p1.x - p0.x;
 		double const dy = p1.y - p0.y;
-		static constexpr double axis_epsilon = 1.0e-6;
-		static constexpr double far_limit = 1.5;
 
 		auto clip_test = [&t0, &t1] (double p, double q) -> bool
 		{
@@ -590,45 +650,6 @@ private:
 
 			return true;
 		};
-
-		// Handle segments that are entirely outside the normal viewing area but may still be visible on the physical monitor due to deflection overshoot.
-		if ((std::abs(dy) <= axis_epsilon) && (((p0.y <= -far_limit) && (p1.y <= -far_limit)) || ((p0.y >= far_limit) && (p1.y >= far_limit))))
-		{
-			result.a.x = std::clamp(p0.x, -1.0, 1.0);
-			result.b.x = std::clamp(p1.x, -1.0, 1.0);
-			result.a.y = (p0.y < 0.0) ? -1.0 : 1.0;
-			result.b.y = result.a.y;
-			result.a.intensity = p0.intensity;
-			result.b.intensity = p1.intensity;
-			if (std::abs(result.b.x - result.a.x) <= axis_epsilon)
-			{
-				result.a.x = -1.0;
-				result.b.x = 1.0;
-			}
-			result.a.intensity = 3.0;
-			result.b.intensity = 3.0;
-			result.valid = true;
-			return result;
-		}
-
-		if ((std::abs(dx) <= axis_epsilon) && (((p0.x <= -far_limit) && (p1.x <= -far_limit)) || ((p0.x >= far_limit) && (p1.x >= far_limit))))
-		{
-			result.a.y = std::clamp(p0.y, -1.0, 1.0);
-			result.b.y = std::clamp(p1.y, -1.0, 1.0);
-			result.a.x = (p0.x < 0.0) ? -1.0 : 1.0;
-			result.b.x = result.a.x;
-			if (std::abs(result.b.y - result.a.y) <= axis_epsilon)
-			{
-				result.a.y = -1.0;
-				result.b.y = 1.0;
-				result.a.intensity = 3.0;
-				result.b.intensity = 3.0;
-			}
-			result.a.intensity = p0.intensity;
-			result.b.intensity = p1.intensity;
-			result.valid = true;
-			return result;
-		}
 
 		if (!clip_test(-dx, p0.x + 1.0)
 			|| !clip_test(dx, 1.0 - p0.x)
@@ -870,6 +891,9 @@ private:
 	double m_total_length = 1.0e-6;
 	float m_hold_x = -1.0f;
 	float m_hold_y = -1.0f;
+	bool m_damage_flash_enabled = true;
+	bool m_damage_flash_positive_slope = true;
+	bool m_damage_flash_emitted = false;
 	bool m_next_frame_ready = false;
 	bool m_frame_started = false;
 	bool m_started = false;
