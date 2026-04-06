@@ -110,12 +110,7 @@ public:
 		m_sample_rate = requested_sample_rate;
 		if(m_sample_rate == 0)
 			m_sample_rate = query_device_sample_rate();
-		ALint const attrs[] =
-		{
-			ALC_FREQUENCY, m_sample_rate,
-			0
-		};
-		m_context = m_openal.alcCreateContext(m_device, attrs);
+		m_context = m_openal.alcCreateContext(m_device, 0);
 		if (!m_context)
 		{
 			osd_printf_error("Star Wars scope output: unable to create OpenAL context\n");
@@ -204,14 +199,71 @@ public:
 		return m_started;
 	}
 
+	struct scope_point
+	{
+		double x;
+		double y;
+		double intensity;
+		uint32_t color = 0xffffffffU;
+		int source_intensity = 255;
+		bool beam_adjust = false;
+		bool is_dot = false;
+	};
+
 	void frame_begin()
 	{
 		m_pending_points.clear();
 		m_lod_keep_accumulator = 0.0;
 		m_damage_flash_emitted = false;
+		m_frame_min_intensity = 255;
+		m_frame_max_intensity = 0;
 	}
 
-	void add_line(int x0, int y0, int x1, int y1, int intensity)
+	static double normalized_sigmoid(double n, double k)
+	{
+		return (n - (n * k)) / (k - (std::abs(n) * 2.0 * k) + 1.0);
+	}
+
+	static double color_luminance(uint32_t color)
+	{
+		double const red = double((color >> 16) & 0xffU);
+		double const green = double((color >> 8) & 0xffU);
+		double const blue = double(color & 0xffU);
+		double const luminance = ((0.2126 * red) + (0.7152 * green) + (0.0722 * blue)) / 255.0;
+		double const blue_dominance = std::max((blue - std::max(red, green)) / 255.0, 0.0);
+
+		return std::clamp((0.20 + (0.80 * std::pow(std::clamp(luminance, 0.0, 1.0), 0.75))) + (0.18 * blue_dominance), 0.0, 1.0);
+	}
+
+	double effective_visual_brightness(scope_point const &point) const
+	{
+		double const intensity = std::clamp(double(point.source_intensity) / 255.0, 0.0, 1.0);
+		double const intensity_weight = normalized_sigmoid(intensity, double(vector_options::s_beam_intensity_weight));
+		double beam_width = (m_frame_min_intensity == m_frame_max_intensity)
+			? double(vector_options::s_beam_width_min)
+			: double(vector_options::s_beam_width_min) + (intensity_weight * double(vector_options::s_beam_width_max - vector_options::s_beam_width_min));
+		double const reference_width = std::max(double(vector_options::s_beam_width_min), 0.25);
+
+		if (point.is_dot)
+			beam_width *= double(vector_options::s_beam_dot_size);
+
+		return intensity * color_luminance(point.color) * std::max(beam_width / reference_width, 0.25);
+	}
+
+	void apply_visual_intensity(std::vector<scope_point> &points) const
+	{
+		for (std::size_t i = 0; (i + 1U) < points.size(); i += 2U)
+		{
+			if (!points[i].beam_adjust)
+				continue;
+
+			double const brightness = effective_visual_brightness(points[i]);
+			points[i].intensity = brightness;
+			points[i + 1U].intensity = brightness;
+		}
+	}
+
+	void add_line(int x0, int y0, int x1, int y1, uint32_t color, int intensity)
 	{
 		rectangle const &visarea = m_screen.visible_area();
 		double const half_width = double(visarea.max_x - visarea.min_x) * 32768.0;
@@ -227,14 +279,15 @@ public:
 		double dy;
 		double length;
 		static constexpr double axis_epsilon = 1.0e-6;
-		static constexpr double far_limit = 1.5;
+		static constexpr double far_limit = 1.7;
+		static constexpr double span_limit = 1.0;
 
 		if ((half_width <= 0.0) || (half_height <= 0.0) || (intensity <= 0))
 			return;
 
-		brightness = double(intensity) / 255.0;
-		brightness *= brightness;
-		brightness *= brightness;
+		m_frame_min_intensity = std::min(m_frame_min_intensity, intensity);
+		m_frame_max_intensity = std::max(m_frame_max_intensity, intensity);
+		brightness = (double(intensity) / 255.0) * color_luminance(color);
 
 		x0_normalized = (double(x0) - xcenter) / half_width;
 		y0_normalized = -(double(y0) - ycenter) / half_height;
@@ -245,12 +298,18 @@ public:
 
 		if (m_damage_flash_enabled && !m_damage_flash_emitted)
 		{
+			bool const full_width_span = (std::min(x0_normalized, x1_normalized) <= -span_limit)
+				&& (std::max(x0_normalized, x1_normalized) >= span_limit);
+			bool const full_height_span = (std::min(y0_normalized, y1_normalized) <= -span_limit)
+				&& (std::max(y0_normalized, y1_normalized) >= span_limit);
 			bool const far_horizontal = (std::abs(dy) <= axis_epsilon)
+				&& full_width_span
 				&& (((y0_normalized <= -far_limit) && (y1_normalized <= -far_limit)) || ((y0_normalized >= far_limit) && (y1_normalized >= far_limit)));
 			bool const far_vertical = (std::abs(dx) <= axis_epsilon)
+				&& full_height_span
 				&& (((x0_normalized <= -far_limit) && (x1_normalized <= -far_limit)) || ((x0_normalized >= far_limit) && (x1_normalized >= far_limit)));
 
-			if (far_horizontal && far_vertical)
+			if (far_horizontal || far_vertical)
 			{
 				emit_damage_flash_lines(3.0);
 				m_damage_flash_emitted = true;
@@ -276,8 +335,8 @@ public:
 			}
 		}
 
-		m_pending_points.emplace_back(scope_point{ x0_normalized, y0_normalized, brightness });
-		m_pending_points.emplace_back(scope_point{ x1_normalized, y1_normalized, brightness });
+		m_pending_points.emplace_back(scope_point{ x0_normalized, y0_normalized, brightness, color, intensity, true, (x0 == x1) && (y0 == y1) });
+		m_pending_points.emplace_back(scope_point{ x1_normalized, y1_normalized, brightness, color, intensity, true, (x0 == x1) && (y0 == y1) });
 	}
 
 	void emit_damage_flash_lines(double intensity)
@@ -323,6 +382,7 @@ public:
 
 	void frame_end()
 	{
+		apply_visual_intensity(m_pending_points);
 		m_next_points = m_pending_points;
 		//sort_points_by_nearest_start(m_next_points);
 		m_next_frame_ready = true;
@@ -465,13 +525,6 @@ private:
 		}
 	};
 
-	struct scope_point
-	{
-		double x;
-		double y;
-		double intensity;
-	};
-
 	struct clipped_segment
 	{
 		scope_point a;
@@ -554,6 +607,13 @@ private:
 		double const dx = a.x - b.x;
 		double const dy = a.y - b.y;
 		return (dx * dx) + (dy * dy);
+	}
+
+	static double brightness_weighted_length(double length, double intensity0, double intensity1)
+	{
+		double const average_brightness = std::clamp((intensity0 + intensity1) * 0.5, 0.0, 1.0);
+		double const dwell_scale = 0.5 + average_brightness;
+		return length * dwell_scale;
 	}
 
 	static void sort_points_by_nearest_start(std::vector<scope_point> &points)
@@ -681,10 +741,11 @@ private:
 			{
 				double const dx = clipped.b.x - clipped.a.x;
 				double const dy = clipped.b.y - clipped.a.y;
-				double const length = std::sqrt((dx * dx) + (dy * dy));
+				double const geometric_length = std::sqrt((dx * dx) + (dy * dy));
+				double const effective_length = brightness_weighted_length(geometric_length, clipped.a.intensity, clipped.b.intensity);
 
-				m_segment_lengths.push_back(length);
-				m_total_length += length;
+				m_segment_lengths.push_back(effective_length);
+				m_total_length += effective_length;
 			}
 			else
 			{
@@ -754,6 +815,7 @@ private:
 		}
 
 		double const scale = (double(frame_count) / m_total_length) / 4.0;
+		double const total_length_speed_boost = 1.0 + (std::log1p(m_total_length) * 0.2);
 
 		for (unsigned long i = 0; i < frame_count; ++i)
 		{
@@ -775,10 +837,12 @@ private:
 			double const dx = clipped.b.x - clipped.a.x;
 			double const dy = clipped.b.y - clipped.a.y;
 			double const di = clipped.b.intensity - clipped.a.intensity;
+			double const geometric_length = std::sqrt((dx * dx) + (dy * dy));
 			double length = m_segment_lengths[m_segment_index / 2U];
 			int samples_per_segment;
 			double t;
 			double brightness;
+			double length_speed_boost;
 			double speed_factor;
 
 			if (length <= 1.0e-9)
@@ -786,8 +850,9 @@ private:
 
 			samples_per_segment = std::max(int(std::floor(length * scale)), m_min_samples_per_segment);
 			t = m_segment_pos / double(samples_per_segment);
-			brightness = clipped.a.intensity + (di * t);
-			speed_factor = std::max(std::exp(-brightness) * m_speed_scale, 0.0001);
+			brightness = std::clamp(clipped.a.intensity + (di * t), 0.0, 1.0);
+			length_speed_boost = 1.0 + std::min(geometric_length, 1.0) * 0.5;
+			speed_factor = std::max(std::exp(-(brightness * 3.0)) * m_speed_scale * length_speed_boost * total_length_speed_boost, 0.0001);
 
 			output[(i * 2U) + 0U] = float(clipped.a.x + (dx * t));
 			output[(i * 2U) + 1U] = float(clipped.a.y + (dy * t));
@@ -891,6 +956,8 @@ private:
 	double m_total_length = 1.0e-6;
 	float m_hold_x = -1.0f;
 	float m_hold_y = -1.0f;
+	int m_frame_min_intensity = 255;
+	int m_frame_max_intensity = 0;
 	bool m_damage_flash_enabled = true;
 	bool m_damage_flash_positive_slope = true;
 	bool m_damage_flash_emitted = false;
@@ -952,9 +1019,9 @@ void starwars_state::machine_start()
 		{
 			m_scope_frame_begin = m_vector->add_frame_begin_notifier([this] () { m_scope_output->frame_begin(); });
 			m_scope_line = m_vector->add_line_notifier(
-					[this] (int x0, int y0, int x1, int y1, uint32_t, int intensity, int, int)
+					[this] (int x0, int y0, int x1, int y1, uint32_t color, int intensity, int, int)
 					{
-						m_scope_output->add_line(x0, y0, x1, y1, intensity);
+						m_scope_output->add_line(x0, y0, x1, y1, color, intensity);
 					});
 			m_scope_frame_end = m_vector->add_frame_end_notifier([this] () { m_scope_output->frame_end(); });
 		}
