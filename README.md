@@ -11,18 +11,34 @@
 
 ##How to launch MAME
 
-e.g.) tiny.exe starwars1 -sn "OSC USB -olod 0.03-ospd 2 -osr 96000
+ e.g.) mamestarwars.exe starwars1 -sn "OSC USB" -olod 0.03 -ospd 2 -osr 96000
 
 Special commandline options:
 
 -sn <Oscilloscope Audio Interface Name(**ASCII ONLY**)>
   Mandatry option.
+
+  e.g.) -sn "OSC USB"
+
 -olod <LoD value(0)>
-  0.003-0.01 is reccomended.
+  0.003-0.01 is reccomended but agly.
+
+  e.g.) -olod 0.01
+
 -ospd <vector speed(1)>
-  Larger value is more faster.
+  Larger value is more faster but agly.
+
+  e.g.) -ospd 2
+
 -osr <osc sampling rate(0)>
   Set Oscilloscope audio interface's sample rate or a lower value.
+  Higher value can draw vector line more faster but agly.
+
+  e.g.) -osr 96000
+
+##How to build
+
+make SUBTARGET=starwars -j DEBUG=0 SYMBOLS=0 OPTIMIZE=3 LTO=0 STRIP_SYMBOLS=1
 
 # MAME
 

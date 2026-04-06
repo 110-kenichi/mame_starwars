@@ -1,0 +1,16 @@
+// license:BSD-3-Clause
+// copyright-holders:MAMEdev Team
+/*******************************************************************************
+
+    starwars.lst
+
+    Minimal driver list for Atari Star Wars build target.
+
+*******************************************************************************/
+
+@source:atari/starwars.cpp
+starwars
+starwars1
+starwarso
+tomcatsw
+esb
