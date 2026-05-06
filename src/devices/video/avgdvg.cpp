@@ -19,6 +19,8 @@
 
 #include "screen.h"
 
+#include <cstdlib>
+
 
 /*************************************
  *
@@ -1252,6 +1254,65 @@ int avgdvg_device_base::done_r()
 
 void avgdvg_device_base::go_w(u8 data)
 {
+	// === Vector RAM dump ===
+	static FILE *dump_fp = nullptr;
+	static bool dump_init_done = false;
+	static bool dump_enabled = false;
+	static uint32_t frame_no = 0;
+	static double dump_start_ms = -1.0;
+
+	if (!dump_init_done)
+	{
+		dump_init_done = true;
+		const char *dump_path = std::getenv("MAME_AVG_DUMP_PATH");
+
+		if (dump_path && dump_path[0] != '\0')
+		{
+			dump_fp = fopen(dump_path, "wb");
+			if (dump_fp)
+			{
+				dump_enabled = true;
+				dump_start_ms = machine().time().as_double() * 1000.0;
+				osd_printf_info("AVG dump enabled: %s\n", dump_path);
+
+				// vectorrom を1回だけダンプ (0x3000-0x3FFF, 4KB)
+				const uint32_t magic_rom = 0x56524F4D; // "VROM"
+				const uint32_t romsize = 0x1000;
+				fwrite(&magic_rom, 4, 1, dump_fp);
+				fwrite(&romsize, 4, 1, dump_fp);
+				uint8_t rombuf[0x1000];
+				for (int i = 0; i < 0x1000; i++)
+					rombuf[i] = m_memspace->read_byte(m_membase + 0x3000 + i);
+				fwrite(rombuf, 1, 0x1000, dump_fp);
+				fflush(dump_fp);
+			}
+		}
+	}
+
+	if (dump_enabled && dump_fp)
+	{
+		// フレームヘッダ + RAM (0x0000-0x2FFF, 12KB)
+		// Header (extended): magic + frame_no + elapsed_ms(u64) + size
+		const uint32_t magic_ram = 0x5652414D; // "VRAM"
+		const uint32_t ramsize = 0x3000;
+		const double now_ms = machine().time().as_double() * 1000.0;
+		const uint64_t elapsed_ms = (dump_start_ms >= 0.0 && now_ms >= dump_start_ms)
+			? static_cast<uint64_t>(now_ms - dump_start_ms)
+			: 0;
+		fwrite(&magic_ram, 4, 1, dump_fp);
+		fwrite(&frame_no, 4, 1, dump_fp);
+		fwrite(&elapsed_ms, 8, 1, dump_fp);
+		fwrite(&ramsize, 4, 1, dump_fp);
+		uint8_t rambuf[0x3000];
+		for (int i = 0; i < 0x3000; i++)
+			rambuf[i] = m_memspace->read_byte(m_membase + i);
+		fwrite(rambuf, 1, 0x3000, dump_fp);
+		fflush(dump_fp);
+
+		frame_no++;
+	}
+	// === ここまで ===
+	
 	vggo();
 
 	if (m_sync_halt && (m_nvect > 10))
