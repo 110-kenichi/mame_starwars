@@ -41,7 +41,7 @@ Special commandline options:
 
   e.g.) -odmg 0
 
-##How to build
+##How to build ( on MINGW64 )
 
 make SUBTARGET=starwars -j DEBUG=0 SYMBOLS=0 OPTIMIZE=3 LTO=0 STRIP_SYMBOLS=1
 
